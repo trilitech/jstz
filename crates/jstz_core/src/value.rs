@@ -5,10 +5,12 @@ use boa_engine::{
         JsMapIterator, JsPromise, JsProxy, JsRegExp, JsSet, JsSetIterator, JsTypedArray,
         JsUint16Array, JsUint32Array, JsUint8Array,
     },
-    Context, JsBigInt, JsObject, JsString, JsSymbol, JsValue,
+    Context, JsBigInt, JsError, JsNativeError, JsObject, JsString, JsSymbol, JsValue,
 };
 
 pub use boa_engine::value::*;
+
+use crate::impl_into_js_from_into;
 
 pub trait IntoJs {
     /// This function converts a Rust value into a JavaScript value.
@@ -104,3 +106,33 @@ where
         JsArray::from_iter(values.into_iter(), context).into()
     }
 }
+
+/// A unit type that corresponds to an undefined JS value
+#[derive(Default)]
+pub enum JsUndefined {
+    #[default]
+    Undefined,
+}
+
+impl TryFromJs for JsUndefined {
+    fn try_from_js(
+        value: &JsValue,
+        _context: &mut Context<'_>,
+    ) -> boa_engine::prelude::JsResult<Self> {
+        if value.is_undefined() {
+            Ok(JsUndefined::Undefined)
+        } else {
+            Err(JsNativeError::typ()
+                .with_message(format!("Expected undefined but found {:?}", value))
+                .into())
+        }
+    }
+}
+
+impl Into<JsValue> for JsUndefined {
+    fn into(self) -> JsValue {
+        JsValue::undefined()
+    }
+}
+
+impl_into_js_from_into!(JsUndefined);

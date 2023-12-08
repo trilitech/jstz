@@ -105,24 +105,6 @@ unsafe impl Trace for UnderlyingSource {
 // TODO derive this implementation with a macro?
 impl TryFromJs for UnderlyingSource {
     fn try_from_js(value: &JsValue, context: &mut Context<'_>) -> JsResult<Self> {
-        // TODO check that this function works as intended in all cases,
-        // and move it either to a new derive macro for TryFromJs, or to JsObject
-        #[allow(non_snake_case)]
-        pub fn get_JsObject_property(
-            obj: &JsObject,
-            name: &str,
-            context: &mut Context<'_>,
-        ) -> JsResult<JsValue> {
-            let key = PropertyKey::from(js_string!(name));
-            let key2 = key.clone();
-            let has_prop = obj.has_property(key, context)?;
-            if has_prop {
-                obj.get(key2, context)
-            } else {
-                Ok(JsValue::Undefined)
-            }
-        }
-
         let this = value.to_object(context)?;
         let start: Option<UnderlyingSourceStartCallback> =
             get_JsObject_property(&this, "start", context)?.try_js_into(context)?;
