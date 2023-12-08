@@ -18,6 +18,7 @@ running on Tezos's smart optimistic rollups, some APIs are not available (e.g. `
   - [`Response`](./response.md)
 - URL API:
   - [`URL`](./url.md)
+  - [`URLPattern`](./url_pattern.md)
   - [`URLSearchParams`](./url_search_params.md)
 
 ## `jstz`-specific APIs
