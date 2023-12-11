@@ -13,7 +13,7 @@
 //!
 //! The implementation is heavily inspired by https://github.com/boa-dev/boa/blob/main/boa_runtime/src/console/mod.rs
 
-use std::{fmt::Display, ops::Deref};
+use std::{cell::Cell, fmt, fmt::Display, ops::Deref};
 
 use boa_engine::{
     js_string,
@@ -23,20 +23,46 @@ use boa_engine::{
     Context, JsArgs, JsNativeError, JsResult, JsValue, NativeFunction,
 };
 use boa_gc::{empty_trace, Finalize, GcRefMut, Trace};
-use jstz_core::{host::HostRuntime, runtime, value::IntoJs};
-use jstz_crypto::{hash::Blake2b, public_key_hash::PublicKeyHash};
+use jstz_core::value::IntoJs;
 use serde::{Deserialize, Serialize};
 
 use tezos_smart_rollup::prelude::debug_msg;
 
-pub const LOG_PREFIX: &str = "[JSTZ:SMART_FUNCTION:LOG] ";
+#[derive(Serialize, Deserialize, Debug)]
+pub enum LogLevel {
+    Error,
+    Warn,
+    Info,
+    Log,
+}
 
+impl LogLevel {
+    pub fn symbol(&self) -> char {
+        match self {
+            LogLevel::Error => '🔴',
+            LogLevel::Warn => '🟠',
+            LogLevel::Info => '🟢',
+            LogLevel::Log => '🪵',
+        }
+    }
+}
+
+impl fmt::Display for LogLevel {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let log_level_str = match self {
+            LogLevel::Error => "error",
+            LogLevel::Warn => "warn",
+            LogLevel::Info => "info",
+            LogLevel::Log => "log",
+        };
+        write!(f, "{}", log_level_str)
+    }
+}
 #[derive(Serialize, Deserialize)]
-pub struct LogRecord {
-    pub contract_address: PublicKeyHash,
-    pub request_id: String,
-    pub level: String,
+pub struct LogData {
+    pub level: LogLevel,
     pub text: String,
+    pub groups_len: usize,
 }
 
 impl Display for LogRecord {
@@ -51,69 +77,26 @@ impl LogRecord {
     }
 }
 
-/// This represents the different types of log messages.
-#[derive(Debug)]
-enum LogMessage {
-    Log(String),
-    Info(String),
-    Warn(String),
-    Error(String),
+thread_local! {
+    /// Thread-local logger
+    static JS_LOGGER: Cell<Option<&'static dyn JsLog>> = Cell::new(None)
 }
 
-impl LogMessage {
-    fn log(self, rt: &impl HostRuntime, console: &Console) {
-        match console {
-            Console::Proto {
-                groups,
-                contract_address,
-                operation_hash,
-            } => {
-                let indent = 2 * groups.len();
-                let log_record = LogRecord {
-                    contract_address: contract_address.clone(),
-                    request_id: operation_hash.to_string(),
-                    level: self.level().to_string(),
-                    text: " ".repeat(indent) + self.message(),
-                }
-                .to_string();
-                rt.write_debug(&(LOG_PREFIX.to_string() + &log_record + "\n"));
-            }
-            Console::Cli { groups } => {
-                let indent = 2 * groups.len();
-                let symbol = self.symbol();
-                for line in self.message().lines() {
-                    debug_msg!(rt, "[{symbol}] {:>indent$}{line}\n", "");
-                }
-            }
-        }
-    }
+pub fn set_js_logger(logger: &'static dyn JsLog) {
+    JS_LOGGER.set(Some(logger));
+}
 
-    fn message(&self) -> &str {
-        match self {
-            LogMessage::Error(msg) => msg,
-            LogMessage::Warn(msg) => msg,
-            LogMessage::Info(msg) => msg,
-            LogMessage::Log(msg) => msg,
+fn js_log(log_data: LogData, context: &mut Context<'_>) -> JsResult<()> {
+    JS_LOGGER.with(|logger| {
+        if let Some(logger) = logger.get() {
+            logger.log(log_data, context);
+            Ok(())
+        } else {
+            Err(JsNativeError::eval()
+                .with_message("JS_LOGGER not set")
+                .into())
         }
-    }
-
-    fn symbol(&self) -> char {
-        match self {
-            LogMessage::Error(_) => '🔴',
-            LogMessage::Warn(_) => '🟠',
-            LogMessage::Info(_) => '🟢',
-            LogMessage::Log(_) => '🪵',
-        }
-    }
-
-    fn level(&self) -> &str {
-        match self {
-            LogMessage::Error(_) => "error",
-            LogMessage::Warn(_) => "warn",
-            LogMessage::Info(_) => "info",
-            LogMessage::Log(_) => "log",
-        }
-    }
+    })
 }
 
 fn display_js(value: &JsValue) -> String {
@@ -201,19 +184,9 @@ fn formatter(data: &[JsValue], context: &mut Context<'_>) -> JsResult<String> {
     }
 }
 
-#[derive(Finalize)]
-enum Console {
-    // Json log
-    Proto {
-        groups: Vec<String>,
-        // TODO: Remove these once `Jstz` object is implemented
-        contract_address: PublicKeyHash,
-        operation_hash: Blake2b,
-    },
-    // pretty log
-    Cli {
-        groups: Vec<String>,
-    },
+#[derive(Finalize, Default)]
+struct Console {
+    groups: Vec<String>,
 }
 
 unsafe impl Trace for Console {
@@ -221,12 +194,6 @@ unsafe impl Trace for Console {
 }
 
 impl Console {
-    fn groups(&mut self) -> &mut Vec<String> {
-        match self {
-            Console::Proto { groups, .. } => groups,
-            Console::Cli { groups } => groups,
-        }
-    }
     /// `console.clear()`
     ///
     /// Removes all groups and clears console if possible.
@@ -238,7 +205,7 @@ impl Console {
     /// [spec]: https://console.spec.whatwg.org/#clear
     /// [mdn]: https://developer.mozilla.org/en-US/docs/Web/API/console/clear
     fn clear(&mut self) {
-        self.groups().clear()
+        self.groups.clear()
     }
 
     /// `console.assert(condition, ...data)`
@@ -256,7 +223,6 @@ impl Console {
         &self,
         assertion: bool,
         data: &[JsValue],
-        rt: &impl HostRuntime,
         context: &mut Context<'_>,
     ) -> JsResult<()> {
         if !assertion {
@@ -271,7 +237,14 @@ impl Console {
                 args[0] = concat.into_js(context);
             }
 
-            LogMessage::Error(formatter(&args, context)?).log(rt, self)
+            js_log(
+                LogData {
+                    level: LogLevel::Error,
+                    text: formatter(data, context)?,
+                    groups_len: self.groups.len(),
+                },
+                context,
+            )?;
         }
 
         Ok(())
@@ -287,13 +260,15 @@ impl Console {
     ///
     /// [spec]: https://console.spec.whatwg.org/#debug
     /// [mdn]: https://developer.mozilla.org/en-US/docs/Web/API/console/debug
-    fn debug(
-        &self,
-        data: &[JsValue],
-        rt: &impl HostRuntime,
-        context: &mut Context<'_>,
-    ) -> JsResult<()> {
-        LogMessage::Log(formatter(data, context)?).log(rt, self);
+    fn debug(&self, data: &[JsValue], context: &mut Context<'_>) -> JsResult<()> {
+        js_log(
+            LogData {
+                level: LogLevel::Log,
+                text: formatter(data, context)?,
+                groups_len: self.groups.len(),
+            },
+            context,
+        )?;
         Ok(())
     }
 
@@ -307,13 +282,15 @@ impl Console {
     ///
     /// [spec]: https://console.spec.whatwg.org/#warn
     /// [mdn]: https://developer.mozilla.org/en-US/docs/Web/API/console/warn
-    fn warn(
-        &self,
-        data: &[JsValue],
-        rt: &impl HostRuntime,
-        context: &mut Context<'_>,
-    ) -> JsResult<()> {
-        LogMessage::Warn(formatter(data, context)?).log(rt, self);
+    fn warn(&self, data: &[JsValue], context: &mut Context<'_>) -> JsResult<()> {
+        js_log(
+            LogData {
+                level: LogLevel::Warn,
+                text: formatter(data, context)?,
+                groups_len: self.groups.len(),
+            },
+            context,
+        )?;
         Ok(())
     }
 
@@ -327,13 +304,15 @@ impl Console {
     ///
     /// [spec]: https://console.spec.whatwg.org/#error
     /// [mdn]: https://developer.mozilla.org/en-US/docs/Web/API/console/error
-    fn error(
-        &self,
-        data: &[JsValue],
-        rt: &impl HostRuntime,
-        context: &mut Context<'_>,
-    ) -> JsResult<()> {
-        LogMessage::Error(formatter(data, context)?).log(rt, self);
+    fn error(&self, data: &[JsValue], context: &mut Context<'_>) -> JsResult<()> {
+        js_log(
+            LogData {
+                level: LogLevel::Error,
+                text: formatter(data, context)?,
+                groups_len: self.groups.len(),
+            },
+            context,
+        )?;
         Ok(())
     }
 
@@ -347,13 +326,15 @@ impl Console {
     ///
     /// [spec]: https://console.spec.whatwg.org/#info
     /// [mdn]: https://developer.mozilla.org/en-US/docs/Web/API/console/info
-    fn info(
-        &self,
-        data: &[JsValue],
-        rt: &impl HostRuntime,
-        context: &mut Context<'_>,
-    ) -> JsResult<()> {
-        LogMessage::Info(formatter(data, context)?).log(rt, self);
+    fn info(&self, data: &[JsValue], context: &mut Context<'_>) -> JsResult<()> {
+        js_log(
+            LogData {
+                level: LogLevel::Info,
+                text: formatter(data, context)?,
+                groups_len: self.groups.len(),
+            },
+            context,
+        )?;
         Ok(())
     }
 
@@ -367,13 +348,15 @@ impl Console {
     ///
     /// [spec]: https://console.spec.whatwg.org/#log
     /// [mdn]: https://developer.mozilla.org/en-US/docs/Web/API/console/log
-    fn log(
-        &self,
-        data: &[JsValue],
-        rt: &impl HostRuntime,
-        context: &mut Context<'_>,
-    ) -> JsResult<()> {
-        LogMessage::Log(formatter(data, context)?).log(rt, self);
+    fn log(&self, data: &[JsValue], context: &mut Context<'_>) -> JsResult<()> {
+        js_log(
+            LogData {
+                level: LogLevel::Log,
+                text: formatter(data, context)?,
+                groups_len: self.groups.len(),
+            },
+            context,
+        )?;
         Ok(())
     }
 
@@ -387,15 +370,17 @@ impl Console {
     ///
     /// [spec]: https://console.spec.whatwg.org/#group
     /// [mdn]: https://developer.mozilla.org/en-US/docs/Web/API/console/group
-    fn group(
-        &mut self,
-        data: &[JsValue],
-        rt: &impl HostRuntime,
-        context: &mut Context<'_>,
-    ) -> JsResult<()> {
+    fn group(&mut self, data: &[JsValue], context: &mut Context<'_>) -> JsResult<()> {
         let group_label = formatter(data, context)?;
-        LogMessage::Log(format!("group: {group_label}")).log(rt, self);
-        self.groups().push(group_label);
+        js_log(
+            LogData {
+                level: LogLevel::Log,
+                text: format!("group: {group_label}"),
+                groups_len: self.groups.len(),
+            },
+            context,
+        )?;
+        self.groups.push(group_label);
         Ok(())
     }
 
@@ -410,20 +395,13 @@ impl Console {
     /// [spec]: https://console.spec.whatwg.org/#groupend
     /// [mdn]: https://developer.mozilla.org/en-US/docs/Web/API/console/groupEnd
     fn group_end(&mut self) {
-        self.groups().pop();
+        self.groups.pop();
     }
 }
 
 /// `ConsoleApi` implements `jstz_core::host::Api`, permitting it to be registered
 /// as a `jstz` runtime API.  
-pub enum ConsoleApi {
-    // TODO: remove this once `Jstz` object is implemented
-    Proto {
-        contract_address: PublicKeyHash,
-        operation_hash: Blake2b,
-    },
-    Cli,
-}
+pub struct ConsoleApi;
 
 impl Console {
     fn from_js_value(value: &JsValue) -> JsResult<GcRefMut<'_, Object, Self>> {
@@ -447,10 +425,8 @@ macro_rules! variadic_console_function {
         ) -> JsResult<JsValue> {
             let console = Console::from_js_value(this)?;
 
-            runtime::with_global_host(|rt| {
-                console.$name(args, rt.deref(), context)?;
-                Ok(JsValue::undefined())
-            })
+            console.$name(args, context)?;
+            Ok(JsValue::undefined())
         }
     };
 }
@@ -470,13 +446,12 @@ impl ConsoleApi {
         context: &mut Context<'_>,
     ) -> JsResult<JsValue> {
         let console = Console::from_js_value(this)?;
-        runtime::with_global_host(|rt| {
-            let assertion = args.get_or_undefined(0).to_boolean();
-            let data = if !args.is_empty() { &args[1..] } else { &[] };
-            console.assert(assertion, data, rt.deref(), context)?;
 
-            Ok(JsValue::undefined())
-        })
+        let assertion = args.get_or_undefined(0).to_boolean();
+        let data = if args.len() >= 1 { &args[1..] } else { &[] };
+        console.assert(assertion, data, context)?;
+
+        Ok(JsValue::undefined())
     }
 
     fn group(
@@ -485,10 +460,8 @@ impl ConsoleApi {
         context: &mut Context<'_>,
     ) -> JsResult<JsValue> {
         let mut console = Console::from_js_value(this)?;
-        runtime::with_global_host(|rt| {
-            console.group(args, rt, context)?;
-            Ok(JsValue::undefined())
-        })
+        console.group(args, context)?;
+        Ok(JsValue::undefined())
     }
 
     fn group_end(
@@ -511,27 +484,11 @@ impl ConsoleApi {
         console.clear();
         Ok(JsValue::undefined())
     }
-
-    fn to_console(&self) -> Console {
-        match self {
-            ConsoleApi::Proto {
-                contract_address,
-                operation_hash,
-            } => Console::Proto {
-                groups: Vec::default(),
-                contract_address: contract_address.clone(),
-                operation_hash: operation_hash.clone(),
-            },
-            ConsoleApi::Cli => Console::Cli {
-                groups: Vec::default(),
-            },
-        }
-    }
 }
 
 impl jstz_core::Api for ConsoleApi {
     fn init(self, context: &mut Context<'_>) {
-        let console = ObjectInitializer::with_native(self.to_console(), context)
+        let console = ObjectInitializer::with_native(Console::default(), context)
             .function(NativeFunction::from_fn_ptr(Self::log), js_string!("log"), 0)
             .function(
                 NativeFunction::from_fn_ptr(Self::error),
