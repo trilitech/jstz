@@ -2,15 +2,10 @@
 //!
 //! This module provides a persistent transactional key-value store.
 
-use std::collections::BTreeSet;
-
-use boa_gc::{empty_trace, Finalize, Trace};
+use boa_gc::{Finalize, Trace};
 use serde::de::DeserializeOwned;
 use tezos_smart_rollup_host::runtime::ValueType;
-use tezos_smart_rollup_host::{
-    path::{OwnedPath, Path},
-    runtime::Runtime,
-};
+use tezos_smart_rollup_host::{path::Path, runtime::Runtime};
 
 use crate::error::Result;
 
@@ -19,8 +14,6 @@ pub mod value;
 
 pub use transaction::{Entry, Transaction};
 pub use value::Value;
-
-const MAX_TX_COUNT: usize = 16;
 
 /// A transactional key-value store using an optimistic concurrency control scheme.
 ///
@@ -89,101 +82,6 @@ impl Storage {
     }
 }
 
-pub struct Kv {
-    clock: Clock,
-    update_sets: [BTreeSet<OwnedPath>; MAX_TX_COUNT],
-}
-
-impl Finalize for Kv {}
-
-unsafe impl Trace for Kv {
-    empty_trace!();
-}
-
-impl Kv {
-    /// Create an in-memory representation of the persistent key-value store
-    /// with a given _scheme_.
-    pub fn new() -> Self {
-        Self {
-            clock: Clock::default(),
-            update_sets: Default::default(),
-        }
-    }
-
-    /// Begin a new transaction.
-    pub fn begin_transaction(&self) -> Transaction {
-        Transaction::new(self.clock.current_timestamp())
-    }
-
-    /// Commit a transaction. Returns `true` if the transaction was successfully
-    /// committed to the persistent key-value store.
-    pub fn commit_transaction(
-        &mut self,
-        rt: &mut impl Runtime,
-        tx: Transaction,
-    ) -> Result<bool> {
-        // Transactions are (optimistically) assigned a timestamp when they
-        // enter the validation phase.
-        let possible_commit_timestamp = self.clock.current_timestamp() + 1;
-
-        // **Validation Phase**
-        //
-        // A transaction at timestamp `j` is 'valid' if the following holds:
-        //  for all transactions `i` < `j`:
-        //      - if the update set of `i` overlaps the read set of `j`:
-        //          transaction `i` must finish its write phase before
-        //          transaction `j` starts its read phase
-        //      - if the update set of `i` overlaps the update set of `j`:
-        //          transaction `i` must finish its write phase before transaction `j`
-        //          starts its write phase
-        //      - else:
-        //          the transaction can overlap arbitrarily
-
-        let read_set = tx.read_set();
-        for ts in tx.begin_timestamp + 1..possible_commit_timestamp {
-            let update_set = &self.update_sets[(ts as usize) % MAX_TX_COUNT];
-            if read_set.intersection(update_set).count() > 0 {
-                return Ok(false);
-            }
-        }
-
-        // **Commit Phase**
-        //
-        // The transaction `tx` has now been verified at this point. We can assign it a `commit_timestamp`
-        // by stepping the store's (lamport) clock. The `update_set` of `tx` is recorded in the
-        // store's recently committed transaction `update_sets`. After this, we can safetly flush
-        // the transaction's local snapshot to the persistent store.
-
-        let commit_timestamp = self.clock.next_timestamp();
-        let update_set = tx.update_set();
-        self.update_sets[(commit_timestamp as usize) % MAX_TX_COUNT] = update_set;
-        tx.flush(rt)?;
-
-        Ok(true)
-    }
-
-    /// Rollback a transaction.
-    pub fn rollback_transaction(&mut self, _: &mut impl Runtime, tx: Transaction) {
-        drop(tx)
-    }
-}
-
-type Timestamp = u64;
-
 // A simple (not atomic) lamport clock
 #[derive(Debug, Default)]
-struct Clock {
-    counter: Timestamp,
-}
-
-impl Clock {
-    fn current_timestamp(&self) -> Timestamp {
-        self.counter
-    }
-
-    fn next_timestamp(&mut self) -> Timestamp {
-        let timestamp = self.counter;
-        self.counter += 1;
-        timestamp
-    }
-}
+struct Clock {}

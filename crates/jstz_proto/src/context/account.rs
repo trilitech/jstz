@@ -1,3 +1,5 @@
+use std::fmt::Debug;
+
 use crate::error::{Error, Result};
 use jstz_core::{
     host::HostRuntime,
@@ -31,7 +33,7 @@ impl ToString for Nonce {
     }
 }
 
-#[derive(Default, Debug, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct Account {
     pub nonce: Nonce,
     pub amount: Amount,
@@ -49,13 +51,13 @@ impl Account {
 
     fn get_mut<'a, 'b>(
         hrt: &impl HostRuntime,
-        tx: &'a mut Transaction,
+        tx: &'b mut Transaction,
         addr: &Address,
     ) -> Result<&'b mut Account>
     where
         'a: 'b,
     {
-        let account_entry = tx.entry(hrt, Self::path(addr)?)?;
+        let account_entry = tx.entry::<Account>(hrt, Self::path(addr)?)?;
 
         Ok(account_entry.or_insert_default())
     }
@@ -66,7 +68,7 @@ impl Account {
         tx: &mut Transaction,
         addr: &Address,
     ) -> Result<()> {
-        match tx.entry(hrt, Self::path(addr)?)? {
+        match tx.entry::<Account>(hrt, Self::path(addr)?)? {
             Entry::Occupied(ntry) => {
                 let acc: &Self = ntry.get();
                 hrt.write_debug(&format!("📜 already exists: {:?}\n", acc.contract_code));
@@ -166,16 +168,22 @@ impl Account {
         dst: &Address,
         amt: Amount,
     ) -> Result<()> {
-        let src = Self::get_mut(hrt, tx, src)?;
-        match src.amount.checked_sub(amt) {
-            Some(amt) => src.amount = amt,
-            None => return Err(Error::BalanceOverflow),
+        {
+            let src = tx
+                .entry::<Account>(hrt, Self::path(src)?)?
+                .or_insert_default();
+            match src.amount.checked_sub(amt) {
+                Some(amt) => src.amount = amt,
+                None => return Err(Error::BalanceOverflow),
+            }
         }
 
-        let dst = Self::get_mut(hrt, tx, dst)?;
-        match dst.amount.checked_add(amt) {
-            Some(amt) => dst.amount = amt,
-            None => return Err(Error::BalanceOverflow),
+        {
+            let dst = Self::get_mut(hrt, tx, dst)?;
+            match dst.amount.checked_add(amt) {
+                Some(amt) => dst.amount = amt,
+                None => return Err(Error::BalanceOverflow),
+            }
         }
 
         Ok(())
@@ -185,25 +193,32 @@ impl Account {
 #[cfg(test)]
 mod test {
     use super::*;
-    use jstz_core::kv::Kv;
     use tezos_smart_rollup_mock::MockHost;
 
     #[test]
-    fn test_zero_account_balance_for_new_accounts() {
+    fn test_zero_account_balance_for_new_accounts() -> Result<()> {
         let hrt = &mut MockHost::default();
-        let mut kv = Kv::new();
 
-        let mut tx = kv.begin_transaction();
+        let tx = &mut Transaction::new();
 
         let pkh = PublicKeyHash::from_base58("tz4FENGt5zkiGaHPm1ya4MgLomgkL1k7Dy7q")
             .expect("Could not parse pkh");
 
         // Act
-        let amt = Account::balance(hrt, &mut tx, &pkh).expect("Could not get balance");
-
-        kv.commit_transaction(hrt, tx).expect("Could not commit tx");
+        let amt = {
+            // This mutable borrow ends at the end of this block
+            //Account::balance(hrt, tx, &pkh).expect("Could not get balance")
+            tx.entry::<Account>(hrt, Account::path(&pkh)?)?
+                .or_insert_default()
+                .amount
+        };
+        {
+            tx.commit::<Account>(hrt).expect("Could not commit tx");
+        }
 
         // Assert
         assert_eq!(amt, 0);
+
+        Ok(())
     }
 }

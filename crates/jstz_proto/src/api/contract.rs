@@ -50,23 +50,31 @@ impl Contract {
         initial_balance: Amount,
     ) -> Result<String> {
         // 1. Check if the contract has sufficient balance
-        if Account::balance(hrt, tx, &self.contract_address)? < initial_balance {
-            return Err(Error::BalanceOverflow.into());
-        }
+        {
+            let balance = Account::balance(hrt, tx, &self.contract_address)
+                .expect("Could not get balance");
+            if balance < initial_balance {
+                return Err(Error::BalanceOverflow.into());
+            }
+        } // The mutable borrow of `tx` in `balance` is released here
 
         // 2. Deploy the contract
-        let address = Script::deploy(
-            hrt,
-            tx,
-            &self.contract_address,
-            contract_code,
-            initial_balance,
-        )?;
+        let address = {
+            let address = Script::deploy(
+                hrt,
+                tx,
+                &self.contract_address,
+                contract_code,
+                initial_balance,
+            )?;
+            address
+        }; // The mutable borrow of `tx` in `Script::deploy` is released here
 
         // 3. Increment nonce of current account
-        // Deploying a contract requires the nonce to be incremented to avoid a
-        // collision with the contract addressing scheme.
-        Account::nonce(hrt, tx, &self.contract_address)?.increment();
+        {
+            let nonce = Account::nonce(hrt, tx, &self.contract_address)?;
+            nonce.increment();
+        } // The mutable borrow of `tx` in `Account::nonce` is released here
 
         // 4. Transfer the balance to the contract
         Account::transfer(hrt, tx, &self.contract_address, &address, initial_balance)?;
