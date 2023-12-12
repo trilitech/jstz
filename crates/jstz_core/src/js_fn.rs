@@ -5,7 +5,7 @@ use boa_engine::{
 };
 use boa_gc::{custom_trace, Finalize, Trace};
 
-use crate::value::IntoJs;
+use crate::value::{IntoJs, JsUndefined};
 
 pub trait IntoJsArgs<const N: usize> {
     fn into_js_args(self, context: &mut Context<'_>) -> [JsValue; N];
@@ -125,12 +125,31 @@ impl<T: IntoJs, const N: usize, I: IntoJsArgs<N>, O: TryFromJs> TryFromJs
     }
 }
 
-impl<T: IntoJs, const N: usize, I: IntoJsArgs<N>, O: TryFromJs> JsFn<T, N, I, O> {
-    pub fn call(&self, this: T, inputs: I, context: &mut Context<'_>) -> JsResult<O> {
+pub trait JsCallable<T, I, O> {
+    fn call(&self, this: T, inputs: I, context: &mut Context<'_>) -> JsResult<O>;
+}
+
+impl<T: IntoJs, const N: usize, I: IntoJsArgs<N>, O: TryFromJs> JsCallable<T, I, O>
+    for JsFn<T, N, I, O>
+{
+    fn call(&self, this: T, inputs: I, context: &mut Context<'_>) -> JsResult<O> {
         let js_this = this.into_js(context);
         let js_args = inputs.into_js_args(context);
         self.deref()
             .call(&js_this, &js_args, context)
             .and_then(|output| O::try_from_js(&output, context))
+    }
+}
+
+pub trait JsCallableWithoutThis<I, O> {
+    fn call(&self, inputs: I, context: &mut Context<'_>) -> JsResult<O>;
+}
+
+impl<I, O, U> JsCallableWithoutThis<I, O> for U
+where
+    U: JsCallable<JsUndefined, I, O>,
+{
+    fn call(&self, inputs: I, context: &mut Context<'_>) -> JsResult<O> {
+        JsCallable::call(self, JsUndefined::Undefined, inputs, context)
     }
 }

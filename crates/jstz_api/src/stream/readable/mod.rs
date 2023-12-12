@@ -4,8 +4,9 @@ use jstz_core::native::{
     register_global_class, ClassBuilder, JsNativeObject, NativeClass,
 };
 
-use crate::stream::readable::underlying_source::{
-    UnderlyingSource, UnderlyingSourceTrait,
+use crate::stream::{
+    queuing_strategy::QueuingStrategyArg,
+    readable::underlying_source::{UnderlyingSource, UnderlyingSourceTrait},
 };
 
 pub mod underlying_source;
@@ -38,6 +39,9 @@ impl NativeClass for ReadableStreamClass {
     ) -> JsResult<Self::Instance> {
         let underlying_source =
             Option::<UnderlyingSource>::try_from_js(args.get_or_undefined(0), context)?;
+        //let queuing_strategy =
+        //    Option::<QueuingStrategyArg>::try_from_js(args.get_or_undefined(0), context);
+        // TODO set default strategy if None
         todo!()
     }
 

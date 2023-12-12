@@ -1,10 +1,8 @@
-//! [Streams Standard - § 7.3. The CountQueuingStrategy class][https://streams.spec.whatwg.org/#cqs-class]
-
 use boa_engine::{
     js_string, object::Object, property::Attribute, value::TryFromJs, Context, JsArgs,
     JsNativeError, JsResult, JsValue, NativeFunction,
 };
-use boa_gc::{empty_trace, Finalize, GcRefMut, Trace};
+use boa_gc::{Finalize, GcRefMut, Trace};
 use jstz_core::{
     accessor,
     native::{Accessor, ClassBuilder, JsNativeObject, NativeClass},
@@ -12,54 +10,40 @@ use jstz_core::{
 
 use crate::{
     idl,
-    stream::{readable::underlying_source::UnderlyingSource, Chunk},
+    stream::{tmp::get_JsObject_property, Chunk},
 };
 
-use super::{other::OtherQueuingStrategy, QueuingStrategyInit};
+use super::{size::SizeAlgorithm, CountQueuingStrategy, HighWaterMarkAndSizeAlgorithm};
 
-/// Streams Standard - § 7.3. The CountQueuingStrategy class][https://streams.spec.whatwg.org/#cqs-class]
-/// > A common queuing strategy when dealing with streams of generic objects is to simply count the number of chunks that have been accumulated so far, waiting until this number reaches a specified high-water mark. As such, this strategy is also provided out of the box.
-///
-/// [Streams Standard - § 7.3.1.][https://streams.spec.whatwg.org/#countqueuingstrategy]
+/// [Streams Standard - § 7.1.][https://streams.spec.whatwg.org/#qs-api]
 /// > ```
-/// > [Exposed=*]
-/// > interface CountQueuingStrategy {
-/// >   constructor(QueuingStrategyInit init);
-/// >   
-/// >   readonly attribute unrestricted double highWaterMark;
-/// >   readonly attribute Function size;
+/// > dictionary QueuingStrategyInit {
+/// >   required unrestricted double highWaterMark;
 /// > };
 /// > ```
-///
-///
-
-pub struct CountQueuingStrategy {
-    high_water_mark: idl::UnrestrictedDouble,
+pub struct QueuingStrategyInit {
+    pub high_water_mark: idl::UnrestrictedDouble,
 }
 
-impl Finalize for CountQueuingStrategy {
-    fn finalize(&self) {}
+impl TryFromJs for QueuingStrategyInit {
+    fn try_from_js(value: &JsValue, context: &mut Context<'_>) -> JsResult<Self> {
+        let this = value.to_object(context)?;
+        let high_water_mark: idl::UnrestrictedDouble =
+            get_JsObject_property(&this, "highWaterMark", context)?
+                .try_js_into::<Option<idl::UnrestrictedDouble>>(context)?
+                .expect("Missing highWaterMark property");
+        // TODO: .try_js_into::<Option<idl::UnrestrictedDouble>>(context) is wrong. "qwe" should map to "NaN"
+
+        Ok(QueuingStrategyInit { high_water_mark })
+    }
 }
 
-unsafe impl Trace for CountQueuingStrategy {
-    empty_trace!();
-}
-
-impl CountQueuingStrategy {
+impl<U: Default> HighWaterMarkAndSizeAlgorithm<idl::UnrestrictedDouble, U> {
     pub fn new(init: QueuingStrategyInit) -> Self {
-        CountQueuingStrategy {
+        HighWaterMarkAndSizeAlgorithm {
             high_water_mark: init.high_water_mark,
+            size_algorithm: U::default(),
         }
-    }
-
-    pub fn high_water_mark(&self) -> idl::UnrestrictedDouble {
-        self.high_water_mark
-    }
-
-    const SIZE: idl::UnrestrictedDouble = 1.0;
-
-    pub fn size(&self, _chunk: &Chunk) -> idl::UnrestrictedDouble {
-        Self::SIZE
     }
 }
 
@@ -70,7 +54,9 @@ impl CountQueuingStrategy {
             .and_then(|obj| obj.downcast_mut::<Self>())
             .ok_or_else(|| {
                 JsNativeError::typ()
-                    .with_message("Failed to convert js value into rust type `CountQueuingStrategy`")
+                    .with_message(
+                        "Failed to convert js value into Rust type `QueuingStrategy`",
+                    )
                     .into()
             })
     }
@@ -84,16 +70,18 @@ impl CountQueuingStrategyClass {
             context,
             CountQueuingStrategy,
             "highWaterMark",
-            get:((strategy, _context) => Ok(strategy.high_water_mark().into()))
+            get:((strategy, _context) => Ok(strategy.high_water_mark.into()))
         )
     }
 
     fn size(
-        _this: &JsValue,
-        _args: &[JsValue],
-        _context: &mut Context<'_>,
+        this: &JsValue,
+        args: &[JsValue],
+        context: &mut Context<'_>,
     ) -> JsResult<JsValue> {
-        Ok(CountQueuingStrategy::SIZE.into())
+        let strategy = CountQueuingStrategy::try_from_js(this)?;
+        let chunk = args.get_or_undefined(0);
+        strategy.size_algorithm.call(chunk, context).map(Into::into)
     }
 }
 
@@ -131,3 +119,5 @@ impl NativeClass for CountQueuingStrategyClass {
         Ok(())
     }
 }
+
+// TODO: implement same things for ByteLength (without duplicating code if possible)

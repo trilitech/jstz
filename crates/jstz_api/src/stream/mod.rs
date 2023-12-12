@@ -2,12 +2,7 @@ use boa_engine::Context;
 
 use crate::idl;
 
-use self::{
-    queuing_strategy::{
-        count::CountQueuingStrategyClass, QueuingStrategy, QueuingStrategyApi,
-    },
-    readable::ReadableStreamApi,
-};
+use self::{queuing_strategy::QueuingStrategyApi, readable::ReadableStreamApi};
 
 pub mod queuing_strategy;
 pub mod readable;
