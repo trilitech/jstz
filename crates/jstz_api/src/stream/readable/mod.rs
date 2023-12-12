@@ -3,9 +3,13 @@ use boa_gc::{custom_trace, Finalize, Trace};
 use jstz_core::native::{
     register_global_class, ClassBuilder, JsNativeObject, NativeClass,
 };
+use urlpattern::quirks;
 
 use crate::stream::{
-    queuing_strategy::QueuingStrategyArg,
+    queuing_strategy::{
+        self, size::CountQueuingStrategySizeAlgorithm, CountQueuingStrategy,
+        QueuingStrategyArg,
+    },
     readable::underlying_source::{UnderlyingSource, UnderlyingSourceTrait},
 };
 
@@ -40,8 +44,14 @@ impl NativeClass for ReadableStreamClass {
         let underlying_source =
             Option::<UnderlyingSource>::try_from_js(args.get_or_undefined(0), context)?;
         //let queuing_strategy =
-        //    Option::<QueuingStrategyArg>::try_from_js(args.get_or_undefined(0), context);
+        //    Option::<QueuingStrategyArg>::try_from_js(args.get_or_undefined(0), context).unwrap_or_default();
         // TODO set default strategy if None
+        // Below is temporary default value to allow working on the rest
+        let queuing_strategy = CountQueuingStrategy {
+            high_water_mark: 1.0,
+            size_algorithm:
+                queuing_strategy::size::CountQueuingStrategySizeAlgorithm::ReturnOne,
+        };
         todo!()
     }
 
