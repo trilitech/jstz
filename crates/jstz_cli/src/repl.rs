@@ -1,5 +1,6 @@
 use anyhow::Result;
 use boa_engine::{js_string, JsResult, JsValue, Source};
+use jstz_api::file::FileApi;
 use jstz_api::{
     encoding::EncodingApi, http::HttpApi, url::UrlApi, urlpattern::UrlPatternApi,
     ConsoleApi, KvApi,
@@ -64,6 +65,7 @@ pub fn exec(self_address: Option<String>, cfg: &Config) -> Result<()> {
         },
         rt.context(),
     );
+    realm_clone.register_api(FileApi, rt.context());
     realm_clone.register_api(DebugApi, rt.context());
 
     loop {
