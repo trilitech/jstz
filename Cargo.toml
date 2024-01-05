@@ -9,6 +9,7 @@ members = [
     "crates/jstz_node",
     "crates/jstz_wpt",
     "crates/octez",
+    "crates/jstz_rollup",
 ]
 
 
@@ -28,38 +29,18 @@ jstz_node = { path = "crates/jstz_node" }
 jstz_cli = { path = "crates/jstz_cli" }
 jstz_wpt = { path = "crates/jstz_wpt" }
 octez = { path = "crates/octez" }
-
-[workspace.dependencies.tezos-smart-rollup]
-git = "https://gitlab.com/tezos/tezos.git"
-
-[workspace.dependencies.tezos-smart-rollup-host]
-git = "https://gitlab.com/tezos/tezos.git"
-
-[workspace.dependencies.tezos-smart-rollup-core]
-git = "https://gitlab.com/tezos/tezos.git"
-
-[workspace.dependencies.tezos-smart-rollup-mock]
-git = "https://gitlab.com/tezos/tezos.git"
-
-[workspace.dependencies.tezos-smart-rollup-encoding]
-git = "https://gitlab.com/tezos/tezos.git"
-
-[workspace.dependencies.tezos-smart-rollup-entrypoint]
-git = "https://gitlab.com/tezos/tezos.git"
-
-[workspace.dependencies.tezos-smart-rollup-debug]
-git = "https://gitlab.com/tezos/tezos.git"
-
-[workspace.dependencies.tezos-smart-rollup-panic-hook]
-git = "https://gitlab.com/tezos/tezos.git"
-
-[workspace.dependencies.tezos-smart-rollup-storage]
-git = "https://gitlab.com/tezos/tezos.git"
-
-[workspace.dependencies.tezos-smart-rollup-installer-config]
-git = "https://gitlab.com/tezos/tezos.git"
+jstz_rollup = { path = "crates/jstz_rollup" }
 
 [patch.crates-io]
+tezos-smart-rollup = { git = "https://gitlab.com/tezos/tezos.git" }
+tezos-smart-rollup-host = { git = "https://gitlab.com/tezos/tezos.git" }
+tezos-smart-rollup-core = { git = "https://gitlab.com/tezos/tezos.git" }
+tezos-smart-rollup-mock = { git = "https://gitlab.com/tezos/tezos.git" }
+tezos-smart-rollup-encoding = { git = "https://gitlab.com/tezos/tezos.git" }
+tezos-smart-rollup-entrypoint = { git = "https://gitlab.com/tezos/tezos.git" }
+tezos-smart-rollup-debug = { git = "https://gitlab.com/tezos/tezos.git" }
+tezos-smart-rollup-panic-hook = { git = "https://gitlab.com/tezos/tezos.git" }
+tezos-smart-rollup-storage = { git = "https://gitlab.com/tezos/tezos.git" }
 boa_ast = { git = "https://github.com/trilitech/boa.git", branch = "sam.finch@/context/expose-instruction-count" }
 boa_engine = { git = "https://github.com/trilitech/boa.git", branch = "sam.finch@/context/expose-instruction-count" }
 boa_gc = { git = "https://github.com/trilitech/boa.git", branch = "sam.finch@/context/expose-instruction-count" }
