@@ -80,6 +80,7 @@ fn register_web_apis(realm: &Realm, context: &mut Context<'_>) {
     realm.register_api(jstz_api::urlpattern::UrlPatternApi, context);
     realm.register_api(jstz_api::http::HttpApi, context);
     realm.register_api(jstz_api::encoding::EncodingApi, context);
+    realm.register_api(jstz_api::file::FileApi, context);
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Deref, DerefMut, Trace, Finalize)]
