@@ -1859,6 +1859,7 @@ dependencies = [
  "jstz_kernel",
  "jstz_proto",
  "nix 0.27.1",
+ "octez",
  "rand 0.8.5",
  "reqwest",
  "reqwest-eventsource",
@@ -1936,6 +1937,7 @@ dependencies = [
  "jstz_api",
  "jstz_crypto",
  "jstz_proto",
+ "octez",
  "parking_lot",
  "reqwest",
  "serde",
@@ -2303,6 +2305,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9cf5f9dd3933bd50a9e1f149ec995f39ae2c496d31fd772c1fd45ebc27e902b0"
 dependencies = [
  "memchr",
+]
+
+[[package]]
+name = "octez"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "hex",
+ "regex",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "signal-hook",
 ]
 
 [[package]]

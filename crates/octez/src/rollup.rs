@@ -1,8 +1,78 @@
+use std::{
+    fs::File,
+    path::PathBuf,
+    process::{Child, Command, Stdio},
+};
+
 use anyhow::{anyhow, Result};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+
+use crate::path_or_default;
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct OctezRollupNode {
+    /// Path to the octez-smart-rollup-node binary
+    pub octez_rollup_node_bin: Option<PathBuf>,
+    /// Path to the octez-smart-rollup-node directory
+    pub octez_rollup_node_dir: PathBuf,
+    /// Path to the octez-client directory
+    pub octez_client_dir: PathBuf,
+    /// RPC endpoint for the octez-node
+    pub endpoint: String,
+}
+
+impl OctezRollupNode {
+    fn command(&self) -> Command {
+        let mut command = Command::new(path_or_default(
+            self.octez_rollup_node_bin.as_ref(),
+            "octez-smart-rollup-node",
+        ));
+        command.args([
+            "--base-dir",
+            self.octez_client_dir.to_str().expect("Invalid path"),
+            "--endpoint",
+            &self.endpoint,
+        ]);
+
+        command
+    }
+
+    /// Run a smart rollup operator
+    pub fn run(
+        &self,
+        addr: &str,
+        port: u16,
+        log_file: &File,
+        rollup: &str,
+        operator: &str,
+        options: &[&str],
+    ) -> Result<Child> {
+        Ok(self
+            .command()
+            .stdout(Stdio::from(log_file.try_clone()?))
+            .stderr(Stdio::from(log_file.try_clone()?))
+            .args([
+                "run",
+                "operator",
+                "for",
+                rollup,
+                "with",
+                "operators",
+                operator,
+                "--data-dir",
+                self.octez_rollup_node_dir.to_str().expect("Invalid path"),
+                "--rpc-addr",
+                addr,
+                "--rpc-port",
+                &port.to_string(),
+            ])
+            .args(options)
+            .spawn()?)
+    }
+}
 
 #[derive(Debug)]
-pub struct RollupClient {
+pub struct OctezRollupClient {
     endpoint: String,
     client: reqwest::Client,
 }
@@ -17,15 +87,15 @@ pub struct ValueError {
 
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
-pub enum ValueResponse {
+enum ValueResponse {
     Value(String),
     Errors(Vec<ValueError>),
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Debug, Deserialize)]
 struct SubkeysResponse(Vec<String>);
 
-impl RollupClient {
+impl OctezRollupClient {
     pub fn new(endpoint: String) -> Self {
         Self {
             endpoint,
@@ -78,9 +148,11 @@ impl RollupClient {
 
             match content {
                 Ok(SubkeysResponse(subkeys)) => Ok(Some(subkeys)),
-                Err(e) => {
-                    Err(anyhow!("Failed to get subkeys for {}. Error: {:?}", key, e))
-                }
+                Err(error) => Err(anyhow!(
+                    "Failed to get subkeys for {}. Error: {:?}",
+                    key,
+                    error
+                )),
             }
         } else {
             Err(anyhow!("Unhandled response status: {}", res.status()))
