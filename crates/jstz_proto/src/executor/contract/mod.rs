@@ -1,5 +1,3 @@
-use std::io::Read;
-
 use boa_engine::{
     js_string,
     object::{builtins::JsPromise, FunctionObjectBuilder},
@@ -7,8 +5,8 @@ use boa_engine::{
 };
 use boa_gc::{Finalize, Trace};
 use derive_more::{Deref, DerefMut};
-use jstz_api::http::request::Request;
 use jstz_api::http::{body::HttpBody, request::RequestClass, response::Response};
+use jstz_api::{http::request::Request, set_js_logger};
 use jstz_core::native::JsNativeObject;
 use jstz_core::{
     host::HostRuntime,
@@ -17,14 +15,20 @@ use jstz_core::{
     runtime::{self, with_global_host},
     Module, Realm,
 };
+use std::io::Read;
 use tezos_smart_rollup::prelude::debug_msg;
 
 use crate::{
-    api,
+    api::{self, TraceData},
     context::account::{Account, Address, Amount},
     operation::OperationHash,
     Error, Result,
 };
+use js_logger::JsonLogger;
+
+pub use js_logger::{LogRecord, PrettyLogger, LOG_PREFIX};
+
+mod js_logger;
 
 pub mod headers {
 
@@ -80,6 +84,7 @@ fn register_web_apis(realm: &Realm, context: &mut Context<'_>) {
     realm.register_api(jstz_api::urlpattern::UrlPatternApi, context);
     realm.register_api(jstz_api::http::HttpApi, context);
     realm.register_api(jstz_api::encoding::EncodingApi, context);
+    realm.register_api(jstz_api::ConsoleApi, context);
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Deref, DerefMut, Trace, Finalize)]
@@ -110,11 +115,12 @@ impl Script {
 
     pub fn load(
         tx: &mut Transaction,
-        address: &Address,
+        contract_address: &Address,
         context: &mut Context<'_>,
     ) -> Result<Self> {
         let src = with_global_host(|hrt| {
-            Account::contract_code(hrt, tx, address)?.ok_or(Error::InvalidAddress)
+            Account::contract_code(hrt, tx, contract_address)?
+                .ok_or(Error::InvalidAddress)
         })?;
 
         with_global_host(|hrt| debug_msg!(hrt, "Evaluating: {src:?}\n"));
@@ -131,23 +137,14 @@ impl Script {
         Ok(Self(module))
     }
 
-    // TODO: we need to be able to specify the type of console API (Proto vs Cli),
-    // With current implementation, calling a contract in CLI will revert the logging back to Proto
     fn register_apis(
         &self,
         contract_address: Address,
-        context: &mut Context<'_>,
         operation_hash: &OperationHash,
+        context: &mut Context<'_>,
     ) {
         register_web_apis(self.realm(), context);
-        // TODO: Register console API in `register_web_apis` once `Jstz` object is implemented
-        self.realm().register_api(
-            jstz_api::ConsoleApi::Proto {
-                contract_address: contract_address.clone(),
-                operation_hash: operation_hash.clone(),
-            },
-            context,
-        );
+
         self.realm().register_api(
             jstz_api::KvApi {
                 contract_address: contract_address.clone(),
@@ -167,13 +164,8 @@ impl Script {
             },
             context,
         );
-        self.realm().register_api(
-            api::ContractApi {
-                contract_address,
-                operation_hash: operation_hash.clone(),
-            },
-            context,
-        );
+        self.realm()
+            .register_api(api::ContractApi { contract_address }, context);
     }
 
     /// Initialize the script, registering all associated runtime APIs
@@ -184,7 +176,7 @@ impl Script {
         operation_hash: &OperationHash,
         context: &mut Context<'_>,
     ) -> JsResult<JsPromise> {
-        self.register_apis(contract_address, context, operation_hash);
+        self.register_apis(contract_address, operation_hash, context);
 
         self.realm().eval_module(self, context)
     }
@@ -211,7 +203,13 @@ impl Script {
     }
 
     /// Runs the script
-    pub fn run(&self, request: &JsValue, context: &mut Context<'_>) -> JsResult<JsValue> {
+    pub fn run(
+        &self,
+        contract_address: &Address,
+        operation_hash: &OperationHash,
+        request: &JsValue,
+        context: &mut Context<'_>,
+    ) -> JsResult<JsValue> {
         let context = &mut self.realm().context_handle(context);
 
         // 1. Register `Kv` and `Transaction` objects in `HostDefined`
@@ -221,10 +219,16 @@ impl Script {
 
             let kv = Kv::new();
             let tx = kv.begin_transaction();
+            let trace_data = TraceData {
+                contract_address: contract_address.clone(),
+                operation_hash: operation_hash.clone(),
+            };
 
             host_defined.insert(kv);
             host_defined.insert(tx);
+            host_defined.insert(trace_data);
         }
+        set_js_logger(&JsonLogger);
 
         // 2. Invoke the script's handler
         let result =
@@ -263,24 +267,30 @@ impl Script {
     /// Loads, initializes and runs the script
     pub fn load_init_run(
         tx: &mut Transaction,
-        address: &Address,
+        contract_address: Address,
+        operation_hash: OperationHash,
         request: &JsValue,
-        operation_hash: &OperationHash,
         context: &mut Context<'_>,
     ) -> JsResult<JsValue> {
         // 1. Load script
-        let script = Script::load(tx, address, context)?;
+        let script = Script::load(tx, &contract_address, context)?;
 
         // 2. Evaluate the script's module
-        let script_promise = script.init(address.clone(), operation_hash, context)?;
+        let script_promise =
+            script.init(contract_address.clone(), &operation_hash, context)?;
 
         // 3. Once evaluated, call the script's handler
         let result = script_promise.then(
             Some(
                 FunctionObjectBuilder::new(context.realm(), unsafe {
                     NativeFunction::from_closure_with_captures(
-                        |_, _, (script, request), context| script.run(request, context),
-                        (script, request.clone()),
+                        |_,
+                         _,
+                         (contract_address, operation_hash, script, request),
+                         context| {
+                            script.run(contract_address, operation_hash, request, context)
+                        },
+                        (contract_address, operation_hash, script, request.clone()),
                     )
                 })
                 .build(),
@@ -319,7 +329,7 @@ pub mod run {
         tx: &mut Transaction,
         source: &Address,
         run: operation::RunContract,
-        operation_hash: &OperationHash,
+        operation_hash: OperationHash,
     ) -> Result<receipt::RunContract> {
         let operation::RunContract {
             uri,
@@ -353,9 +363,9 @@ pub mod run {
                 jstz_core::future::block_on(async move {
                     let result = Script::load_init_run(
                         tx,
-                        &address,
-                        request.inner(),
+                        address,
                         operation_hash,
+                        request.inner(),
                         rt,
                     )?;
 

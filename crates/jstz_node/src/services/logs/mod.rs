@@ -5,13 +5,12 @@ use actix_web::{
     Responder,
 };
 use jstz_crypto::public_key_hash::PublicKeyHash;
+use jstz_proto::executor::contract::{LogRecord, LOG_PREFIX};
 
 use std::io::{Error, ErrorKind::InvalidInput, Result};
 use std::sync::Arc;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
-
-use jstz_api::{LogRecord, LOG_PREFIX};
 
 use self::broadcaster::Broadcaster;
 
@@ -61,7 +60,7 @@ impl LogsService {
                     if let Ok(Some(msg)) = line {
                         if msg.starts_with(LOG_PREFIX) {
                             let log = LogRecord::try_from_string(&msg[LOG_PREFIX.len()..])
-                                .unwrap();
+                                .expect("Failed to parse log record from string");
                             broadcaster.broadcast(&log.contract_address, &msg[LOG_PREFIX.len()..]).await;
                         }
                     }

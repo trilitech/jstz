@@ -1,7 +1,7 @@
 use crate::Config;
 use anyhow::Result;
 use futures_util::stream::StreamExt;
-use jstz_api::LogRecord;
+use jstz_proto::executor::contract::LogRecord;
 use reqwest_eventsource::{Event, EventSource};
 
 pub async fn exec(address_or_alias: String, cfg: &Config) -> Result<()> {
@@ -20,7 +20,8 @@ pub async fn exec(address_or_alias: String, cfg: &Config) -> Result<()> {
             Ok(Event::Open) => println!("Connection open with {}", url),
             Ok(Event::Message(message)) => {
                 if let Ok(log_record) = serde_json::from_str::<LogRecord>(&message.data) {
-                    println!("{}", serde_json::to_string_pretty(&log_record).unwrap());
+                    let LogRecord { level, text, .. } = log_record;
+                    println!("[{}]: {}", level.symbol(), text);
                 }
             }
             Err(err) => {
