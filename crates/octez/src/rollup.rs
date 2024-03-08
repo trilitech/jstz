@@ -138,6 +138,8 @@ impl OctezRollupClient {
             .send()
             .await?;
 
+        println!("Response: {:?}", res);
+
         if res.status() == 200 || res.status() == 500 {
             let content: Option<ValueResponse> = res.json().await?;
             match content {

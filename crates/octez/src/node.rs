@@ -28,6 +28,7 @@ impl OctezNode {
         network: &str,
         http_endpoint: &str,
         rpc_endpoint: &str,
+        allow_all_rpc: &str,
         num_connections: u32,
     ) -> Result<()> {
         run_command(self.command().args([
@@ -41,6 +42,8 @@ impl OctezNode {
             http_endpoint,
             "--rpc-addr",
             rpc_endpoint,
+            "--allow-all-rpc",
+            allow_all_rpc,
             "--connections",
             num_connections.to_string().as_str(),
         ]))
