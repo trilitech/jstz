@@ -187,11 +187,19 @@ impl<'a> Iterator for AccountsIter<'a> {
     }
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum OctezSetup {
+    /// Process path to Octez installation
+    Process(PathBuf),
+    /// Docker container name or ID for Octez
+    Docker(String),
+}
+
 #[derive(Serialize, Deserialize, Debug, Default, Clone)]
 pub struct Config {
-    /// Path to octez installation
+    /// Octez setup configuration: Process path or Docker container
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub octez_path: Option<PathBuf>,
+    pub octez_setup: Option<OctezSetup>,
     /// Sandbox config (None if sandbox is not running)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sandbox: Option<SandboxConfig>,
