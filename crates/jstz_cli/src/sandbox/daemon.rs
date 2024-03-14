@@ -636,15 +636,9 @@ pub async fn main(detach: bool, background: bool, cfg: &mut Config) -> Result<()
     }
 
     if detach {
-<<<<<<< HEAD
         if in_container() {
             bail_user_error!("Detaching from the terminal is not supported in this environment. Please run `jstz sandbox start` without the `--detach` flag.");
         }
-=======
-        // if in_container() {
-        //     bail_user_error!("Detaching from the terminal is not supported in this environment. Please run `jstz sandbox start` without the `--detach` flag.");
-        // }
->>>>>>> a9c65cc (build: wip)
 
         let child = start_background_process(cfg)?;
         run_progress_bar(cfg, Some(child))?;

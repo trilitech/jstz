@@ -7,20 +7,32 @@ use std::{
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
-use crate::{path_or_default, run_command};
+use crate::{run_command, OctezSetup};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct OctezNode {
     /// Path to the octez-node binary
     /// If None, the binary will inside PATH will be used
-    pub octez_node_bin: Option<PathBuf>,
+    pub octez_setup: Option<OctezSetup>,
     /// Path to the octez-node directory
     pub octez_node_dir: PathBuf,
 }
 
 impl OctezNode {
+    /// Create a command based on the octez setup configuration
     fn command(&self) -> Command {
-        Command::new(path_or_default(self.octez_node_bin.as_ref(), "octez-node"))
+        match &self.octez_setup {
+            Some(OctezSetup::Process(path)) => {
+                let bin_path = path.join("octez-node");
+                Command::new(bin_path)
+            }
+            Some(OctezSetup::Docker(container_name)) => {
+                let mut cmd = Command::new("docker");
+                cmd.args(["exec", container_name, "octez-node"]);
+                cmd
+            }
+            None => Command::new("octez-node"), // Default to using the system's octez-node
+        }
     }
 
     pub fn config_init(

@@ -9,7 +9,7 @@ use derive_more::{From, TryInto};
 use jstz_crypto::{public_key::PublicKey, secret_key::SecretKey};
 use jstz_proto::context::account::Address;
 use log::debug;
-use octez::{OctezClient, OctezNode, OctezRollupNode};
+use octez::{OctezClient, OctezNode, OctezRollupNode, OctezSetup};
 use serde::{Deserialize, Serialize};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 
@@ -187,14 +187,6 @@ impl<'a> Iterator for AccountsIter<'a> {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub enum OctezSetup {
-    /// Process path to Octez installation
-    Process(PathBuf),
-    /// Docker container name or ID for Octez
-    Docker(String),
-}
-
 #[derive(Serialize, Deserialize, Debug, Default, Clone)]
 pub struct Config {
     /// Octez setup configuration: Process path or Docker container
@@ -336,10 +328,7 @@ impl Config {
         let network = self.network(network_name)?;
 
         Ok(OctezClient {
-            octez_client_bin: self
-                .octez_path
-                .as_ref()
-                .map(|path| path.join("octez-client")),
+            octez_setup: self.octez_setup.clone(),
             octez_client_dir: self.octez_client_dir(network_name)?,
             endpoint: network.octez_node_rpc_endpoint,
             disable_disclaimer: true,
@@ -360,7 +349,7 @@ impl Config {
         let sandbox = self.sandbox()?;
 
         Ok(OctezNode {
-            octez_node_bin: self.octez_path.as_ref().map(|path| path.join("octez-node")),
+            octez_setup: self.octez_setup.clone(),
             octez_node_dir: sandbox.octez_node_dir.clone(),
         })
     }
@@ -374,10 +363,7 @@ impl Config {
         let network = self.network(network_name)?;
 
         Ok(OctezRollupNode {
-            octez_rollup_node_bin: self
-                .octez_path
-                .as_ref()
-                .map(|path| path.join("octez-smart-rollup-node")),
+            octez_setup: self.octez_setup.clone(),
             octez_rollup_node_dir: sandbox.octez_rollup_node_dir.clone(),
             octez_client_dir: self.octez_client_dir(network_name)?,
             endpoint: network.octez_node_rpc_endpoint,
