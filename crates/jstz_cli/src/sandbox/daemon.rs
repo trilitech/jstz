@@ -38,7 +38,8 @@ use crate::{
     config::{jstz_home_dir, Config, SandboxConfig},
     error::{anyhow, bail_user_error, Result},
     sandbox::{
-        SANDBOX_BOOTSTRAP_ACCOUNTS, SANDBOX_JSTZ_NODE_PORT, SANDBOX_LOCAL_HOST_ADDR,
+        SANDBOX_BOOTSTRAP_ACCOUNTS, SANDBOX_JSTZ_NODE_PORT,
+        SANDBOX_LOCAL_ALLOW_ALL_RPC_ADDR, SANDBOX_LOCAL_HOST_ADDR,
         SANDBOX_OCTEZ_NODE_PORT, SANDBOX_OCTEZ_NODE_RPC_PORT,
         SANDBOX_OCTEZ_SMART_ROLLUP_PORT,
     },
@@ -162,10 +163,11 @@ fn init_node(log_file: &mut File, progress: &mut u32, cfg: &Config) -> Result<()
 
     cfg.octez_node()?.config_init(
         "sandbox",
-        &format!("{}:{}", SANDBOX_LOCAL_HOST_ADDR, SANDBOX_OCTEZ_NODE_PORT),
+        &format!("{}:{}", "0.0.0.0", SANDBOX_OCTEZ_NODE_PORT),
+        &format!("{}:{}", "0.0.0.0", SANDBOX_OCTEZ_NODE_RPC_PORT),
         &format!(
             "{}:{}",
-            SANDBOX_LOCAL_HOST_ADDR, SANDBOX_OCTEZ_NODE_RPC_PORT
+            SANDBOX_LOCAL_ALLOW_ALL_RPC_ADDR, SANDBOX_OCTEZ_NODE_RPC_PORT
         ),
         0,
     )?;

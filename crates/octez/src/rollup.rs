@@ -7,12 +7,12 @@ use std::{
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::path_or_default;
+use crate::OctezSetup;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct OctezRollupNode {
-    /// Path to the octez-smart-rollup-node binary
-    pub octez_rollup_node_bin: Option<PathBuf>,
+    /// Setup for Octez smart rollup node (process path or Docker container)
+    pub octez_setup: Option<OctezSetup>,
     /// Path to the octez-smart-rollup-node directory
     pub octez_rollup_node_dir: PathBuf,
     /// If None, the default directory will be used (~/.tezos-client/)
@@ -23,18 +23,34 @@ pub struct OctezRollupNode {
 
 impl OctezRollupNode {
     fn command(&self) -> Command {
-        let mut command = Command::new(path_or_default(
-            self.octez_rollup_node_bin.as_ref(),
-            "octez-smart-rollup-node",
-        ));
+        match &self.octez_setup {
+            Some(OctezSetup::Process(path)) => {
+                let bin_path = path.join("octez-smart-rollup-node");
+                let mut command = Command::new(bin_path);
+                self.configure_command(&mut command);
+                command
+            }
+            Some(OctezSetup::Docker(container_name)) => {
+                let mut command = Command::new("docker");
+                command.args(["exec", container_name, "octez-smart-rollup-node"]);
+                self.configure_command(&mut command);
+                command
+            }
+            None => {
+                let mut command = Command::new("octez-smart-rollup-node");
+                self.configure_command(&mut command);
+                command
+            }
+        }
+    }
 
+    /// Configures the command with common arguments.
+    fn configure_command(&self, command: &mut Command) {
         command.args(["--endpoint", &self.endpoint]);
 
         if let Some(path) = &self.octez_client_dir {
             command.args(["--base-dir", path.to_str().expect("Invalid path")]);
         }
-
-        command
     }
 
     /// Run a smart rollup operator
@@ -137,6 +153,8 @@ impl OctezRollupClient {
             ))
             .send()
             .await?;
+
+        println!("Response: {:?}", res);
 
         if res.status() == 200 || res.status() == 500 {
             let content: Option<ValueResponse> = res.json().await?;

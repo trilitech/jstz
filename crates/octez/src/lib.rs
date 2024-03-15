@@ -10,13 +10,15 @@ mod thread;
 pub use client::*;
 pub use node::*;
 pub use rollup::*;
+use serde::{Deserialize, Serialize};
 pub use thread::*;
 
-pub(crate) fn path_or_default<'a>(
-    path: Option<&'a PathBuf>,
-    default: &'a str,
-) -> &'a str {
-    path.and_then(|bin| bin.to_str()).unwrap_or(default)
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum OctezSetup {
+    /// Process path to Octez installation
+    Process(PathBuf),
+    /// Docker container name or ID for Octez
+    Docker(String),
 }
 
 pub(crate) fn run_command_with_output(command: &mut Command) -> Result<String> {

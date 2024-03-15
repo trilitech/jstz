@@ -8,13 +8,12 @@ use anyhow::{anyhow, Result};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
-use crate::{path_or_default, run_command, run_command_with_output};
+use crate::{run_command, run_command_with_output, OctezSetup};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct OctezClient {
-    /// Path to the octez-client binary
-    /// If None, the binary will inside PATH will be used
-    pub octez_client_bin: Option<PathBuf>,
+    /// /// Setup for Octez client (process path or Docker container)
+    pub octez_setup: Option<OctezSetup>,
     /// If None, the default directory will be used (~/.tezos-client/)
     pub octez_client_dir: Option<PathBuf>,
     /// RPC endpoint for the octez-node
@@ -46,13 +45,13 @@ pub struct AliasInfo {
 
 impl OctezClient {
     pub fn new(
-        octez_client_bin: Option<PathBuf>,
+        octez_setup: Option<OctezSetup>,
         octez_client_dir: Option<PathBuf>,
         endpoint: String,
         disable_disclaimer: bool,
     ) -> Self {
         Self {
-            octez_client_bin,
+            octez_setup,
             octez_client_dir,
             endpoint,
             disable_disclaimer,
@@ -60,11 +59,29 @@ impl OctezClient {
     }
 
     fn command(&self) -> Command {
-        let mut command = Command::new(path_or_default(
-            self.octez_client_bin.as_ref(),
-            "octez-client",
-        ));
+        match &self.octez_setup {
+            Some(OctezSetup::Process(path)) => {
+                let bin_path = path.join("octez-client");
+                let mut command = Command::new(bin_path);
+                self.configure_command(&mut command);
+                command
+            }
+            Some(OctezSetup::Docker(container_name)) => {
+                let mut cmd = Command::new("docker");
+                cmd.args(["exec", container_name, "octez-client"]);
+                self.configure_command(&mut cmd);
+                cmd
+            }
+            None => {
+                let mut command = Command::new("octez-client");
+                self.configure_command(&mut command);
+                command
+            }
+        }
+    }
 
+    /// Configures the command with common arguments.
+    fn configure_command(&self, command: &mut Command) {
         if let Some(path) = &self.octez_client_dir {
             command.args(["--base-dir", path.to_str().expect("Invalid path")]);
         }
@@ -74,8 +91,6 @@ impl OctezClient {
         if self.disable_disclaimer {
             command.env("TEZOS_CLIENT_UNSAFE_DISABLE_DISCLAIMER", "Y");
         }
-
-        command
     }
 
     /// Generate a new key with the given `alias`
