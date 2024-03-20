@@ -26,6 +26,7 @@
     "@tezos/jstz-dashboard": "^0.0.0"
   },
   "devDependencies": {
+    "vercel": "^33.6.1",
     "@commitlint/cli": "^18.6.1",
     "@commitlint/config-conventional": "^18.6.2",
     "esbuild": "^0.20.1",
