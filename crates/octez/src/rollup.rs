@@ -1,5 +1,6 @@
 use std::{
     fs::File,
+    //intrinsics::prefetch_read_instruction,
     path::PathBuf,
     process::{Child, Command, Stdio},
 };
@@ -8,12 +9,12 @@ use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use tezos_smart_rollup_encoding::smart_rollup::SmartRollupAddress;
 
-use crate::path_or_default;
+use crate::OctezSetup;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct OctezRollupNode {
-    /// Path to the octez-smart-rollup-node binary
-    pub octez_rollup_node_bin: Option<PathBuf>,
+    /// Setup for Octez smart rollup node (process path or Docker container)
+    pub octez_setup: Option<OctezSetup>,
     /// Path to the octez-smart-rollup-node directory
     pub octez_rollup_node_dir: PathBuf,
     /// If None, the default directory will be used (~/.tezos-client/)
@@ -24,18 +25,43 @@ pub struct OctezRollupNode {
 
 impl OctezRollupNode {
     fn command(&self) -> Command {
-        let mut command = Command::new(path_or_default(
-            self.octez_rollup_node_bin.as_ref(),
-            "octez-smart-rollup-node",
-        ));
+        match &self.octez_setup {
+            Some(OctezSetup::Process(path)) => {
+                let bin_path = path.join("octez-smart-rollup-node");
+                let mut command = Command::new(bin_path);
+                self.configure_command(&mut command);
+                command
+            }
+            Some(OctezSetup::Docker(container_name)) => {
+                let mut command = Command::new("docker");
+                command.args([
+                    "run",
+                    "--network=host",
+                    "--entrypoint=/usr/local/bin/octez-smart-rollup-node",
+                    "-v",
+                    "/var:/var",
+                    "-v",
+                    "/tmp:/tmp",
+                    container_name,
+                ]);
+                self.configure_command(&mut command);
+                command
+            }
+            None => {
+                let mut command = Command::new("octez-smart-rollup-node");
+                self.configure_command(&mut command);
+                command
+            }
+        }
+    }
 
+    /// Configures the command with common arguments.
+    fn configure_command(&self, command: &mut Command) {
         command.args(["--endpoint", &self.endpoint]);
 
         if let Some(path) = &self.octez_client_dir {
             command.args(["--base-dir", path.to_str().expect("Invalid path")]);
         }
-
-        command
     }
 
     /// Run a smart rollup operator
@@ -48,6 +74,27 @@ impl OctezRollupNode {
         operator: &str,
         options: &[&str],
     ) -> Result<Child> {
+        let mut binding = self.command();
+        let c = binding
+            .stdout(Stdio::from(log_file.try_clone()?))
+            .stderr(Stdio::from(log_file.try_clone()?))
+            .args([
+                "run",
+                "operator",
+                "for",
+                rollup,
+                "with",
+                "operators",
+                operator,
+                "--data-dir",
+                self.octez_rollup_node_dir.to_str().expect("Invalid path"),
+                "--rpc-addr",
+                addr,
+                "--rpc-port",
+                &port.to_string(),
+            ])
+            .args(options);
+        println!("{:?}", c);
         Ok(self
             .command()
             .stdout(Stdio::from(log_file.try_clone()?))
@@ -132,6 +179,7 @@ impl OctezRollupClient {
     }
 
     pub async fn get_value(&self, key: &str) -> Result<Option<Vec<u8>>> {
+        println!("Getting value for key: {}", key);
         let res = self
             .client
             .get(format!(
@@ -139,7 +187,11 @@ impl OctezRollupClient {
                 self.endpoint, key
             ))
             .send()
-            .await?;
+            .await;
+
+        println!("Response: {:?}", res);
+
+        let res = res?;
 
         if res.status() == 200 || res.status() == 500 {
             let content: Option<ValueResponse> = res.json().await?;
