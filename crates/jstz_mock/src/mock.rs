@@ -6,7 +6,8 @@ use tezos_crypto_rs::hash::ContractKt1Hash;
 use tezos_smart_rollup::{
     michelson::{
         ticket::{FA2_1Ticket, Ticket},
-        MichelsonBytes, MichelsonContract, MichelsonNat, MichelsonOption, MichelsonPair,
+        MichelsonBytes, MichelsonContract, MichelsonNat, MichelsonOption, MichelsonOr,
+        MichelsonPair,
     },
     storage::path::RefPath,
     types::{Contract, PublicKeyHash, SmartRollupAddress},
@@ -19,7 +20,13 @@ pub const MOCK_SENDER: &str = "KT1R7WEtNNim3YgkxPt8wPMczjH3eyhbJMtz";
 pub const MOCK_SOURCE: &str = "tz1WXDeZmSpaCCJqes9GknbeUtdKhJJ8QDA2";
 
 pub const TICKETER_PATH: RefPath = RefPath::assert_from(b"/ticketer");
-pub type RollupType = MichelsonPair<MichelsonContract, FA2_1Ticket>;
+pub type RollupType = MichelsonOr<
+    MichelsonPair<MichelsonContract, FA2_1Ticket>,
+    MichelsonPair<
+        MichelsonContract,
+        MichelsonPair<MichelsonOption<MichelsonContract>, FA2_1Ticket>,
+    >,
+>;
 
 // Wrapper over Mockhost to simplify setup of mock scenarios
 pub struct JstzMockHost(MockHost);
@@ -91,7 +98,10 @@ impl MockNativeDeposit {
         )
         .unwrap();
 
-        MichelsonPair(MichelsonContract(self.receiver.clone()), ticket)
+        MichelsonOr::Left(MichelsonPair(
+            MichelsonContract(self.receiver.clone()),
+            ticket,
+        ))
     }
 }
 
