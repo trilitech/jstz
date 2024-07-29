@@ -133,12 +133,18 @@ impl SignedOperation {
 }
 
 pub mod external {
+
     use super::*;
 
     #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
     pub struct Deposit {
+        // Inbox message id is unique to each message and
+        // suitable as a nonce
+        pub inbox_id: u32,
+        // Amount to deposit
         pub amount: Amount,
-        pub reciever: Address,
+        // Receiver address
+        pub receiver: Address,
     }
 
     #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -184,4 +190,5 @@ pub mod external {
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ExternalOperation {
     Deposit(external::Deposit),
+    FaDeposit(external::FaDeposit),
 }
