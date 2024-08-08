@@ -38,8 +38,8 @@ use crate::{
     error::{anyhow, bail_user_error, Result},
     sandbox::{
         SANDBOX_BOOTSTRAP_ACCOUNTS, SANDBOX_JSTZ_NODE_PORT, SANDBOX_LOCAL_HOST_ADDR,
-        SANDBOX_OCTEZ_NODE_PORT, SANDBOX_OCTEZ_NODE_RPC_PORT,
-        SANDBOX_OCTEZ_SMART_ROLLUP_PORT,
+        SANDBOX_LOCAL_HOST_LISTENING_ADDR, SANDBOX_OCTEZ_NODE_PORT,
+        SANDBOX_OCTEZ_NODE_RPC_PORT, SANDBOX_OCTEZ_SMART_ROLLUP_PORT,
     },
     term::{self, styles},
 };
@@ -257,12 +257,16 @@ fn init_node(log_file: &mut File, progress: &mut u32, cfg: &Config) -> Result<()
 
     cfg.octez_node()?.config_init(
         "sandbox",
-        &format!("{}:{}", SANDBOX_LOCAL_HOST_ADDR, SANDBOX_OCTEZ_NODE_PORT),
         &format!(
             "{}:{}",
-            SANDBOX_LOCAL_HOST_ADDR, SANDBOX_OCTEZ_NODE_RPC_PORT
+            SANDBOX_LOCAL_HOST_LISTENING_ADDR, SANDBOX_OCTEZ_NODE_PORT
+        ),
+        &format!(
+            "{}:{}",
+            SANDBOX_LOCAL_HOST_LISTENING_ADDR, SANDBOX_OCTEZ_NODE_RPC_PORT
         ),
         0,
+        sandbox_params_path().to_str().expect("Invalid path"),
     )?;
     debug!(log_file, "\tInitialized octez-node configuration");
 
@@ -289,6 +293,8 @@ fn start_node(cfg: &Config) -> Result<Child> {
             "--history-mode",
             "archive",
         ],
+        sandbox_params_path().to_str().expect("Invalid path"),
+        sandbox_path().to_str().expect("Invalid path"),
     )
 }
 
@@ -337,6 +343,7 @@ fn init_client(log_file: &mut File, progress: &mut u32, cfg: &Config) -> Result<
         "PtParisBxoLz5gzMmn3d9WBQNoPSZakgnkMC2VNuQ3KXfUtUQeZ",
         "1",
         "activator",
+        sandbox_params_path().to_str().expect("Invalid path"),
         sandbox_params_path().to_str().expect("Invalid path"),
     )?;
     debug!(log_file, " done");
@@ -388,7 +395,7 @@ async fn run_jstz_node(cfg: &Config) -> Result<()> {
                 debug!(log_file, "Jstz node started 🎉");
 
                 jstz_node::run(
-                    SANDBOX_LOCAL_HOST_ADDR,
+                    SANDBOX_LOCAL_HOST_LISTENING_ADDR,
                     SANDBOX_JSTZ_NODE_PORT,
                     &format!(
                         "http://{}:{}",
@@ -415,7 +422,6 @@ fn start_sandbox(
     let mut sandbox = Sandbox::new(config, logs);
     // 1. Init node
     init_node(log_file, progress, cfg)?;
-
     // 2. As a thread, start node
     progress_step(log_file, progress);
     let node = OctezThread::from_child(start_node(cfg)?);
@@ -479,7 +485,7 @@ fn start_sandbox(
         OPERATOR_ADDRESS,
         &preimages_dir,
         &logs_dir,
-        SANDBOX_LOCAL_HOST_ADDR,
+        SANDBOX_LOCAL_HOST_LISTENING_ADDR,
         SANDBOX_OCTEZ_SMART_ROLLUP_PORT,
     )?);
     sandbox.set_rollup_node(rollup_node)?;
@@ -535,10 +541,13 @@ pub async fn run_sandbox(cfg: &mut Config) -> Result<()> {
         octez_node_dir: TempDir::with_prefix("octez_node")?.into_path(),
         octez_rollup_node_dir: TempDir::with_prefix("octez_rollup_node")?.into_path(),
     };
+    // Check existence of octez_node_dir
+    if !sandbox_cfg.octez_node_dir.exists() {
+        debug!(log_file, "sandbox_cfg.octez_node_dir does not exists");
+    }
 
     cfg.sandbox = Some(sandbox_cfg);
     debug!(log_file, "Sandbox configured {:?}", cfg.sandbox);
-
     // 2. Start sandbox
     progress_step(&mut log_file, &mut progress);
     let mut sandbox = start_sandbox(&mut log_file, &mut progress, cfg)?;
