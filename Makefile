@@ -1,9 +1,24 @@
+# In some situations we might want to override the default profile (release) (e.g. in CI)
+PROFILE ?= release
+PROFILE_OPT := --profile $(PROFILE)
+
+# Frustratingly, for the dev profile, /target/debug is used. For all other profiles, 
+# /target/$(PROFILE) is used. This is a workaround to ensure that the correct target
+# directory is used for the dev profile.
+ifeq ($(PROFILE), dev)
+	PROFILE_TARGET_DIR := debug
+else
+	PROFILE_TARGET_DIR := $(PROFILE)
+endif
+
+CLI_KERNEL_PATH := crates/jstz_cli/jstz_kernel.wasm
+
 .PHONY: all
 all: test build check
 
 .PHONY: build
 build: build-cli-kernel
-	@cargo build --release
+	@cargo build $(PROFILE_OPT)
 
 .PHONY: build-bridge
 build-bridge:
@@ -14,15 +29,15 @@ build-bridge:
 
 .PHONY: build-kernel
 build-kernel:
-	@cargo build --package jstz_kernel --target wasm32-unknown-unknown --release
+	@cargo build --package jstz_kernel --target wasm32-unknown-unknown $(PROFILE_OPT)
 
 .PHONY: build-cli-kernel
 build-cli-kernel: build-kernel
-	@cp target/wasm32-unknown-unknown/release/jstz_kernel.wasm crates/jstz_cli/jstz_kernel.wasm
+	@cp target/wasm32-unknown-unknown/$(PROFILE_TARGET_DIR)/jstz_kernel.wasm $(CLI_KERNEL_PATH)
 
 .PHONY: build-cli
 build-cli: build-cli-kernel
-	@cargo build --package jstz_cli --release
+	@cargo build --package jstz_cli $(PROFILE_OPT)
 
 .PHONY: build-deps
 build-deps:
@@ -101,9 +116,8 @@ fmt: fmt-nix fmt-rust fmt-js
 .PHONY: fmt-check
 fmt-check: fmt-nix-check fmt-rust-check fmt-js-check
 
-# FIXME: 
-# Clippy builds the CLI since the CLI must expand the macro containing the bytes of the `jstz_kernel.wasm` file. 
-# So in order to lint the CLI we need to build the kernel
 .PHONY: lint
-lint: build-cli-kernel
+lint:
+	@touch $(CLI_KERNEL_PATH)
 	@cargo clippy -- --no-deps -D warnings -A clippy::let_underscore_future -A clippy::module_inception -A clippy::op_ref -A clippy::manual_strip -A clippy::missing_safety_doc -A clippy::slow_vector_initialization -A clippy::empty_loop -A clippy::collapsible-match
+	@rm -f $(CLI_KERNEL_PATH)
